@@ -1,0 +1,62 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String     @id @default(cuid())
+  email     String?    @unique
+  age       Int?
+  gender    String?
+  isAnonymous Boolean  @default(true)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  testSessions TestSession[]
+
+  @@map("users")
+}
+
+model TestSession {
+  id        String     @id @default(cuid())
+  userId    String?
+  user      User?      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  testType  String     // "ishihara", "farnsworth", "fm100", "anomaloscope"
+  status    String     @default("in_progress") // "in_progress", "completed", "failed"
+  score     Int?
+  severity  String?    // "normal", "mild", "moderate", "severe"
+  colorType String?    // "protanopia", "deuteranopia", "tritanopia", "achromat"
+
+  results   TestResult[]
+
+  startedAt DateTime   @default(now())
+  completedAt DateTime?
+
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@map("test_sessions")
+}
+
+model TestResult {
+  id        String     @id @default(cuid())
+  sessionId String
+  session   TestSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  plateNumber Int?
+  answer      String?
+  correct     Boolean?
+  responseTime Int?     // in milliseconds
+
+  createdAt DateTime   @default(now())
+
+  @@map("test_results")
+}
