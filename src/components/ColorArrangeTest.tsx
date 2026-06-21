@@ -3,13 +3,17 @@
 import { useState, useMemo } from 'react';
 
 /**
- * Тест на упорядочивание цветов (Farnsworth D-15 / FM 100 Hue) —
- * формат «выбери следующий по похожести цвет» (как в реальной клинической
- * процедуре). Никакого перетаскивания: пользователь просто кликает фишку,
- * наиболее близкую по цвету к последней выбранной.
+ * Тест на упорядочивание цветов (D-15 / FM 100 Hue), формат «выбери следующий».
  *
- * Total Error Score: сумма модулей разностей «истинных» индексов у соседних
- * фишек в собранной последовательности (с замыканием в круг).
+ * Ключевые решения для удобства:
+ * - Это НЕ замкнутый круг оттенков (где оба конца красные и порядок неоднозначен),
+ *   а ОТКРЫТЫЙ градиент от одного цвета к другому.
+ * - Закреплены ОБА конца (старт слева и финиш справа) — нужно заполнить середину.
+ *   Это убирает неоднозначность: правильный порядок единственный.
+ * - Шаг оттенка достаточно крупный, чтобы человек с нормальным зрением справлялся,
+ *   но при дальтонизме характерные цвета путаются.
+ *
+ * Подсчёт: сумма модулей разностей «истинных» индексов у соседних фишек.
  */
 
 interface Cap {
@@ -19,16 +23,18 @@ interface Cap {
 }
 
 interface Props {
-  capCount: number;
+  capCount: number; // включая оба закреплённых конца
   onComplete: (result: { errorScore: number; perfect: number; arrangement: number[] }) => void;
   title: string;
+  hueStart?: number;
+  hueEnd?: number;
 }
 
-function generateCaps(count: number): Cap[] {
+function generateCaps(count: number, hueStart: number, hueEnd: number): Cap[] {
   const caps: Cap[] = [];
   for (let i = 0; i < count; i++) {
-    const hue = Math.round((i / count) * 360);
-    caps.push({ id: `cap-${i}`, trueIndex: i, color: `hsl(${hue}, 65%, 55%)` });
+    const hue = Math.round(hueStart + ((hueEnd - hueStart) * i) / (count - 1));
+    caps.push({ id: `cap-${i}`, trueIndex: i, color: `hsl(${hue}, 70%, 52%)` });
   }
   return caps;
 }
@@ -42,16 +48,24 @@ function shuffle<T>(arr: T[]): T[] {
   return a;
 }
 
-export default function ColorArrangeTest({ capCount, onComplete, title }: Props) {
-  const { reference, initialPool } = useMemo(() => {
-    const all = generateCaps(capCount);
-    return { reference: all[0], initialPool: shuffle(all.slice(1)) };
-  }, [capCount]);
+export default function ColorArrangeTest({
+  capCount,
+  onComplete,
+  title,
+  hueStart = 0,
+  hueEnd = 270,
+}: Props) {
+  const { startCap, endCap, initialPool } = useMemo(() => {
+    const all = generateCaps(capCount, hueStart, hueEnd);
+    return {
+      startCap: all[0],
+      endCap: all[all.length - 1],
+      initialPool: shuffle(all.slice(1, all.length - 1)),
+    };
+  }, [capCount, hueStart, hueEnd]);
 
   const [ordered, setOrdered] = useState<Cap[]>([]);
   const [pool, setPool] = useState<Cap[]>(initialPool);
-
-  const lastCap = ordered.length > 0 ? ordered[ordered.length - 1] : reference;
 
   const pick = (cap: Cap) => {
     setOrdered((o) => [...o, cap]);
@@ -66,52 +80,69 @@ export default function ColorArrangeTest({ capCount, onComplete, title }: Props)
   };
 
   const finish = () => {
-    const sequence = [reference, ...ordered];
+    const sequence = [startCap, ...ordered, endCap];
     let errorScore = 0;
     for (let i = 0; i < sequence.length - 1; i++) {
       errorScore += Math.abs(sequence[i].trueIndex - sequence[i + 1].trueIndex);
     }
-    errorScore += Math.abs(sequence[sequence.length - 1].trueIndex - sequence[0].trueIndex);
-    onComplete({ errorScore, perfect: capCount, arrangement: sequence.map((c) => c.trueIndex) });
+    onComplete({
+      errorScore,
+      perfect: capCount - 1, // идеальный открытый ряд = (N-1) шагов по 1
+      arrangement: sequence.map((c) => c.trueIndex),
+    });
   };
 
-  const capSize = capCount > 18 ? 40 : 52;
+  const capSize = capCount > 14 ? 44 : 56;
   const allPlaced = pool.length === 0;
 
   return (
     <div className="card">
       <h2 className="text-xl font-bold mb-2">{title}</h2>
       <p className="text-sm text-gray-600 mb-6">
-        Нажимайте на фишку, которая <strong>по цвету ближе всего</strong> к последней
-        выбранной (она обведена). Собирайте плавную цепочку оттенков.
+        Слева — <strong>начало</strong>, справа — <strong>конец</strong> цветового ряда (закреплены).
+        Заполните середину: нажимайте на фишку, которая по цвету идёт <strong>следующей</strong> после
+        обведённой. Должен получиться плавный переход слева направо.
       </p>
 
-      {/* Собранная цепочка */}
+      {/* Ряд: старт + выбранные + финиш */}
       <div className="mb-6">
-        <p className="text-xs text-gray-500 mb-2">Ваша последовательность:</p>
-        <div className="flex flex-wrap gap-2 items-center p-3 bg-gray-50 rounded-lg min-h-[60px]">
+        <div className="flex flex-wrap gap-2 items-center p-3 bg-gray-50 rounded-lg min-h-[64px]">
           <div
-            style={{ width: capSize, height: capSize, background: reference.color }}
+            style={{ width: capSize, height: capSize, background: startCap.color }}
             className="rounded-full border-4 border-gray-800 shrink-0"
-            title="Старт"
+            title="Начало"
           />
           {ordered.map((cap, i) => (
             <div
               key={cap.id}
               style={{ width: capSize, height: capSize, background: cap.color }}
-              className={`rounded-full shrink-0 ${
+              className={`rounded-full shrink-0 shadow ${
                 i === ordered.length - 1 ? 'border-4 border-orange-500' : 'border-2 border-white'
-              } shadow`}
+              }`}
             />
           ))}
+          {/* пустые места */}
+          {Array.from({ length: pool.length }).map((_, i) => (
+            <div
+              key={`slot-${i}`}
+              style={{ width: capSize, height: capSize }}
+              className="rounded-full border-2 border-dashed border-gray-300 shrink-0"
+            />
+          ))}
+          <div className="text-gray-400 px-1">→</div>
+          <div
+            style={{ width: capSize, height: capSize, background: endCap.color }}
+            className="rounded-full border-4 border-gray-800 shrink-0"
+            title="Конец"
+          />
         </div>
       </div>
 
-      {/* Пул для выбора */}
+      {/* Пул выбора */}
       {!allPlaced ? (
         <div className="mb-6">
           <p className="text-xs text-gray-500 mb-2">
-            Выберите следующий цвет (ближайший к обведённой фишке):
+            Какой цвет идёт следующим после обведённой фишки?
           </p>
           <div className="flex flex-wrap gap-3 p-3 bg-white border border-gray-200 rounded-lg">
             {pool.map((cap) => (
@@ -127,7 +158,7 @@ export default function ColorArrangeTest({ capCount, onComplete, title }: Props)
         </div>
       ) : (
         <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6 text-sm text-green-800 text-center">
-          Все фишки расставлены. Проверьте цепочку и завершите.
+          Ряд собран. Проверьте плавность перехода и завершите.
         </div>
       )}
 

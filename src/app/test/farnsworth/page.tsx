@@ -52,8 +52,10 @@ export default function FarnsworthTest() {
         <div className="max-w-2xl mx-auto">
           {!done ? (
             <ColorArrangeTest
-              capCount={15}
-              title="Расставьте 15 цветов по порядку оттенка"
+              capCount={12}
+              hueStart={0}
+              hueEnd={260}
+              title="Соберите плавный переход цвета"
               onComplete={handleComplete}
             />
           ) : (

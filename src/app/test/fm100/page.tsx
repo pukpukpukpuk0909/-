@@ -51,8 +51,10 @@ export default function FM100Test() {
         <div className="max-w-3xl mx-auto">
           {!done ? (
             <ColorArrangeTest
-              capCount={24}
-              title="Расставьте оттенки в плавном порядке (24 фишки)"
+              capCount={16}
+              hueStart={20}
+              hueEnd={320}
+              title="Соберите плавный переход цвета (16 фишек)"
               onComplete={handleComplete}
             />
           ) : (
