@@ -22,10 +22,11 @@ interface Props {
   seed?: number;
 }
 
-// Палитры подобраны так, чтобы для нормального зрения была чёткая
-// оранжево-зелёная граница, а для protan/deutan — сливалась.
-const FIGURE_COLORS = ['#D9714A', '#E08A5B', '#CB5A3C', '#E69A6B', '#D06840'];
-const BG_COLORS = ['#9AA45E', '#B3B873', '#869150', '#C2C184', '#A7AC68', '#7E8A48'];
+// Палитры подобраны так, чтобы для НОРМАЛЬНОГО зрения была чёткая
+// оранжево-зелёная граница (читается легко), а для protan/deutan — сливалась.
+// Фигура — насыщенный оранжевый/красный; фон — насыщенный зелёный.
+const FIGURE_COLORS = ['#E8642A', '#F07A33', '#D9551F', '#F28B4B', '#E96E2E', '#FF8C42'];
+const BG_COLORS = ['#5C9A4A', '#6FB05A', '#4F8C3E', '#7FBD68', '#68A555', '#86C46F'];
 
 // Простой детерминированный ГПСЧ (mulberry32), чтобы пластина была стабильной.
 function makeRng(seed: number) {
@@ -65,7 +66,7 @@ export default function IshiaharaPlate({ number, size = 360, seed = 1 }: Props) 
     mctx.fillStyle = '#fff';
     mctx.textAlign = 'center';
     mctx.textBaseline = 'middle';
-    mctx.font = `bold ${size * 0.6}px Arial, sans-serif`;
+    mctx.font = `900 ${size * 0.66}px Arial, sans-serif`;
     mctx.fillText(number, size / 2, size / 2 + size * 0.02);
     const maskData = mctx.getImageData(0, 0, size, size).data;
 
@@ -84,7 +85,7 @@ export default function IshiaharaPlate({ number, size = 360, seed = 1 }: Props) 
     const R = size / 2 - 2;
 
     // 3. Размещаем точки без сильного наложения (сетка-бакеты для скорости).
-    const cell = 12;
+    const cell = 9;
     const grid = new Map<string, Array<[number, number, number]>>();
     const key = (gx: number, gy: number) => `${gx},${gy}`;
     const placed: Array<{ x: number; y: number; r: number; fig: boolean }> = [];
@@ -106,14 +107,14 @@ export default function IshiaharaPlate({ number, size = 360, seed = 1 }: Props) 
       return false;
     };
 
-    const maxAttempts = 16000;
-    for (let i = 0; i < maxAttempts && placed.length < 2200; i++) {
+    const maxAttempts = 40000;
+    for (let i = 0; i < maxAttempts && placed.length < 5000; i++) {
       // случайная точка внутри большого круга
       const ang = rng() * Math.PI * 2;
       const rad = Math.sqrt(rng()) * R;
       const x = cx + Math.cos(ang) * rad;
       const y = cy + Math.sin(ang) * rad;
-      const r = 2.5 + rng() * 5.5;
+      const r = 1.8 + rng() * 3.6;
 
       if (Math.hypot(x - cx, y - cy) + r > R) continue;
       if (tooClose(x, y, r)) continue;

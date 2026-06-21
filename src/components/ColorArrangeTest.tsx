@@ -1,33 +1,15 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import {
-  DndContext,
-  closestCenter,
-  PointerSensor,
-  TouchSensor,
-  useSensor,
-  useSensors,
-  DragEndEvent,
-} from '@dnd-kit/core';
-import {
-  SortableContext,
-  rectSortingStrategy,
-  useSortable,
-  arrayMove,
-} from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
 
 /**
- * Универсальный тест на упорядочивание цветов (Farnsworth D-15 / FM 100 Hue).
+ * Тест на упорядочивание цветов (Farnsworth D-15 / FM 100 Hue) —
+ * формат «выбери следующий по похожести цвет» (как в реальной клинической
+ * процедуре). Никакого перетаскивания: пользователь просто кликает фишку,
+ * наиболее близкую по цвету к последней выбранной.
  *
- * Принцип настоящего теста: даны цветные «фишки», образующие плавный круг
- * оттенков. Пилотная (референсная) фишка закреплена; остальные перемешаны.
- * Пользователь перетаскивает фишки, выстраивая плавный градиент.
- *
- * Подсчёт (Total Error Score): сумма модулей разностей «истинных» индексов
- * у соседних фишек. Идеальный порядок = (N-1). Чем больше — тем сильнее
- * перепутаны цвета (характерно для дефицита цветового зрения).
+ * Total Error Score: сумма модулей разностей «истинных» индексов у соседних
+ * фишек в собранной последовательности (с замыканием в круг).
  */
 
 interface Cap {
@@ -43,15 +25,10 @@ interface Props {
 }
 
 function generateCaps(count: number): Cap[] {
-  // Равномерный круг оттенков (приближение Munsell hue circle).
   const caps: Cap[] = [];
   for (let i = 0; i < count; i++) {
     const hue = Math.round((i / count) * 360);
-    caps.push({
-      id: `cap-${i}`,
-      trueIndex: i,
-      color: `hsl(${hue}, 65%, 55%)`,
-    });
+    caps.push({ id: `cap-${i}`, trueIndex: i, color: `hsl(${hue}, 65%, 55%)` });
   }
   return caps;
 }
@@ -65,111 +42,107 @@ function shuffle<T>(arr: T[]): T[] {
   return a;
 }
 
-function SortableCap({ cap, size }: { cap: Cap; size: number }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
-    useSortable({ id: cap.id });
-
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    width: size,
-    height: size,
-    background: cap.color,
-    opacity: isDragging ? 0.6 : 1,
-    touchAction: 'none' as const,
-  };
-
-  return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      {...attributes}
-      {...listeners}
-      className="rounded-full border-2 border-white shadow cursor-grab active:cursor-grabbing"
-    />
-  );
-}
-
 export default function ColorArrangeTest({ capCount, onComplete, title }: Props) {
-  const reference = useMemo(() => {
+  const { reference, initialPool } = useMemo(() => {
     const all = generateCaps(capCount);
-    return all[0];
+    return { reference: all[0], initialPool: shuffle(all.slice(1)) };
   }, [capCount]);
 
-  const [caps, setCaps] = useState<Cap[]>(() => {
-    const all = generateCaps(capCount);
-    return shuffle(all.slice(1)); // первую (пилотную) закрепляем отдельно
-  });
+  const [ordered, setOrdered] = useState<Cap[]>([]);
+  const [pool, setPool] = useState<Cap[]>(initialPool);
 
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 120, tolerance: 8 } })
-  );
+  const lastCap = ordered.length > 0 ? ordered[ordered.length - 1] : reference;
 
-  const handleDragEnd = (event: DragEndEvent) => {
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-    setCaps((items) => {
-      const oldIndex = items.findIndex((c) => c.id === active.id);
-      const newIndex = items.findIndex((c) => c.id === over.id);
-      return arrayMove(items, oldIndex, newIndex);
-    });
+  const pick = (cap: Cap) => {
+    setOrdered((o) => [...o, cap]);
+    setPool((p) => p.filter((c) => c.id !== cap.id));
+  };
+
+  const undo = () => {
+    if (ordered.length === 0) return;
+    const last = ordered[ordered.length - 1];
+    setOrdered((o) => o.slice(0, -1));
+    setPool((p) => [last, ...p]);
   };
 
   const finish = () => {
-    // Полная последовательность: референс + расставленные пользователем.
-    const sequence = [reference, ...caps];
+    const sequence = [reference, ...ordered];
     let errorScore = 0;
     for (let i = 0; i < sequence.length - 1; i++) {
       errorScore += Math.abs(sequence[i].trueIndex - sequence[i + 1].trueIndex);
     }
-    // Замыкаем круг (D-15 — круговой тест).
     errorScore += Math.abs(sequence[sequence.length - 1].trueIndex - sequence[0].trueIndex);
-
-    onComplete({
-      errorScore,
-      perfect: capCount, // идеальный круговой обход = capCount
-      arrangement: sequence.map((c) => c.trueIndex),
-    });
+    onComplete({ errorScore, perfect: capCount, arrangement: sequence.map((c) => c.trueIndex) });
   };
 
-  const capSize = capCount > 20 ? 34 : 48;
+  const capSize = capCount > 18 ? 40 : 52;
+  const allPlaced = pool.length === 0;
 
   return (
     <div className="card">
       <h2 className="text-xl font-bold mb-2">{title}</h2>
       <p className="text-sm text-gray-600 mb-6">
-        Перетаскивайте фишки так, чтобы получился <strong>плавный переход цветов</strong>.
-        Слева закреплена стартовая фишка — продолжите ряд от неё.
+        Нажимайте на фишку, которая <strong>по цвету ближе всего</strong> к последней
+        выбранной (она обведена). Собирайте плавную цепочку оттенков.
       </p>
 
-      <div className="flex flex-wrap gap-2 items-center mb-6 p-4 bg-gray-50 rounded-lg">
-        {/* Закреплённая пилотная фишка */}
-        <div
-          style={{
-            width: capSize,
-            height: capSize,
-            background: reference.color,
-          }}
-          className="rounded-full border-4 border-gray-800 shadow shrink-0"
-          title="Стартовая фишка (закреплена)"
-        />
-        <div className="w-px h-8 bg-gray-300 mx-1" />
-
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-          <SortableContext items={caps.map((c) => c.id)} strategy={rectSortingStrategy}>
-            <div className="flex flex-wrap gap-2">
-              {caps.map((cap) => (
-                <SortableCap key={cap.id} cap={cap} size={capSize} />
-              ))}
-            </div>
-          </SortableContext>
-        </DndContext>
+      {/* Собранная цепочка */}
+      <div className="mb-6">
+        <p className="text-xs text-gray-500 mb-2">Ваша последовательность:</p>
+        <div className="flex flex-wrap gap-2 items-center p-3 bg-gray-50 rounded-lg min-h-[60px]">
+          <div
+            style={{ width: capSize, height: capSize, background: reference.color }}
+            className="rounded-full border-4 border-gray-800 shrink-0"
+            title="Старт"
+          />
+          {ordered.map((cap, i) => (
+            <div
+              key={cap.id}
+              style={{ width: capSize, height: capSize, background: cap.color }}
+              className={`rounded-full shrink-0 ${
+                i === ordered.length - 1 ? 'border-4 border-orange-500' : 'border-2 border-white'
+              } shadow`}
+            />
+          ))}
+        </div>
       </div>
 
-      <button onClick={finish} className="w-full btn-primary">
-        Завершить и проверить порядок →
-      </button>
+      {/* Пул для выбора */}
+      {!allPlaced ? (
+        <div className="mb-6">
+          <p className="text-xs text-gray-500 mb-2">
+            Выберите следующий цвет (ближайший к обведённой фишке):
+          </p>
+          <div className="flex flex-wrap gap-3 p-3 bg-white border border-gray-200 rounded-lg">
+            {pool.map((cap) => (
+              <button
+                key={cap.id}
+                onClick={() => pick(cap)}
+                style={{ width: capSize, height: capSize, background: cap.color }}
+                className="rounded-full border-2 border-white shadow hover:scale-110 transition-transform"
+                aria-label="цветная фишка"
+              />
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6 text-sm text-green-800 text-center">
+          Все фишки расставлены. Проверьте цепочку и завершите.
+        </div>
+      )}
+
+      <div className="flex gap-3">
+        <button
+          onClick={undo}
+          disabled={ordered.length === 0}
+          className="btn-secondary flex-1 disabled:opacity-40"
+        >
+          ← Отменить
+        </button>
+        <button onClick={finish} disabled={!allPlaced} className="btn-primary flex-1 disabled:opacity-40">
+          Завершить →
+        </button>
+      </div>
     </div>
   );
 }
