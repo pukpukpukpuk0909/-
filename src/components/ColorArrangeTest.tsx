@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
+import { getCoefficient } from '@/lib/session';
 
 /**
  * Тест на упорядочивание цветов (D-15 / FM 100 Hue), формат «выбери следующий».
@@ -30,11 +31,12 @@ interface Props {
   hueEnd?: number;
 }
 
-function generateCaps(count: number, hueStart: number, hueEnd: number): Cap[] {
+function generateCaps(count: number, hueStart: number, hueEnd: number, coefficient: number): Cap[] {
   const caps: Cap[] = [];
+  const sat = Math.max(0, Math.min(100, 70 * coefficient)); // калибровка насыщенности
   for (let i = 0; i < count; i++) {
     const hue = Math.round(hueStart + ((hueEnd - hueStart) * i) / (count - 1));
-    caps.push({ id: `cap-${i}`, trueIndex: i, color: `hsl(${hue}, 70%, 52%)` });
+    caps.push({ id: `cap-${i}`, trueIndex: i, color: `hsl(${hue}, ${sat.toFixed(1)}%, 52%)` });
   }
   return caps;
 }
@@ -56,7 +58,7 @@ export default function ColorArrangeTest({
   hueEnd = 270,
 }: Props) {
   const { startCap, endCap, initialPool } = useMemo(() => {
-    const all = generateCaps(capCount, hueStart, hueEnd);
+    const all = generateCaps(capCount, hueStart, hueEnd, getCoefficient());
     return {
       startCap: all[0],
       endCap: all[all.length - 1],

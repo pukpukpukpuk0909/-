@@ -1,30 +1,21 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import ColorArrangeTest from '@/components/ColorArrangeTest';
+import { saveResult } from '@/lib/session';
 
 export default function FM100Test() {
   const [done, setDone] = useState(false);
   const [result, setResult] = useState<{ errorScore: number; perfect: number } | null>(null);
-  const [sessionId, setSessionId] = useState('');
-
-  useEffect(() => {
-    setSessionId(Math.random().toString(36).substring(2, 11).toUpperCase());
-  }, []);
 
   const handleComplete = (r: { errorScore: number; perfect: number; arrangement: number[] }) => {
     setResult(r);
-    localStorage.setItem(
-      `test_${sessionId}`,
-      JSON.stringify({
-        testType: 'fm100',
-        sessionId,
-        errorScore: r.errorScore,
-        perfect: r.perfect,
-        timestamp: new Date().toISOString(),
-      })
-    );
+    saveResult('fm100', {
+      errorScore: r.errorScore,
+      perfect: r.perfect,
+      arrangement: r.arrangement,
+    });
     setDone(true);
   };
 

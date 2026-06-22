@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
+import { calibratedColor } from '@/lib/color';
 
 /**
  * Реальный генератор псевдоизохроматических пластин Ишихары.
@@ -20,6 +21,7 @@ interface Props {
   number: string;
   size?: number;
   seed?: number;
+  coefficient?: number; // калибровочный множитель насыщенности
 }
 
 // Несколько цветовых сочетаний (фигура / фон). Для НОРМАЛЬНОГО зрения
@@ -65,7 +67,7 @@ function makeRng(seed: number) {
   };
 }
 
-export default function IshiaharaPlate({ number, size = 360, seed = 1 }: Props) {
+export default function IshiaharaPlate({ number, size = 360, seed = 1, coefficient = 1 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -158,16 +160,19 @@ export default function IshiaharaPlate({ number, size = 360, seed = 1 }: Props) 
       grid.get(k)!.push([x, y, r]);
     }
 
-    // 4. Рисуем точки.
+    // 4. Рисуем точки. Яркость каждой точки слегка рандомизируется (±10%),
+    // одинаково для фигуры и фона, — чтобы цифру нельзя было распознать
+    // по светлоте, только по оттенку (как в настоящих пластинах).
     for (const d of placed) {
       const palette = d.fig ? FIGURE_COLORS : BG_COLORS;
-      const color = palette[Math.floor(rng() * palette.length)];
+      const hex = palette[Math.floor(rng() * palette.length)];
+      const jitter = (rng() - 0.5) * 20; // ±10% по светлоте
       ctx.beginPath();
       ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2);
-      ctx.fillStyle = color;
+      ctx.fillStyle = calibratedColor(hex, coefficient, jitter);
       ctx.fill();
     }
-  }, [number, size, seed]);
+  }, [number, size, seed, coefficient]);
 
   return (
     <canvas

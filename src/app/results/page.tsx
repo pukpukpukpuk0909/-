@@ -4,13 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import jsPDF from 'jspdf';
 import ColorBlindSimulation, { DeficiencyType } from '@/components/ColorBlindSimulation';
-
-interface AnyResult {
-  testType: string;
-  sessionId: string;
-  timestamp: string;
-  [key: string]: any;
-}
+import { getSession, SessionState } from '@/lib/session';
 
 interface Diagnosis {
   type: DeficiencyType;
@@ -19,30 +13,30 @@ interface Diagnosis {
   description: string;
 }
 
-function computeDiagnosis(
-  ish?: AnyResult,
-  farn?: AnyResult,
-  fm?: AnyResult,
-  anom?: AnyResult
-): Diagnosis {
+function computeDiagnosis(results: Record<string, any>): Diagnosis {
+  const ish = results.ishihara;
+  const fm = results.fm100;
+  const anom = results.anomaloscope;
+
   const acc = ish ? ish.accuracy : 100;
   const deviation = anom ? anom.deviation : 0;
+  const range = anom ? anom.matchingRange : 0;
   const tes = fm ? fm.errorScore - fm.perfect : 0;
 
-  // Тип
+  // Есть ли нарушение
+  const abnormal = acc < 85 || Math.abs(deviation) > 6 || range > 8 || tes > 30;
+
   let type: DeficiencyType = 'normal';
-  if (acc < 85 || Math.abs(deviation) > 8 || tes > 30) {
-    if (deviation > 8) type = 'protan';
-    else if (deviation < -8) type = 'deutan';
-    else type = acc < 85 ? 'deutan' : 'normal'; // дейтан — самый частый
+  if (abnormal) {
+    if (deviation > 6) type = 'protan';
+    else if (deviation < -6) type = 'deutan';
+    else type = 'deutan'; // самый частый при неопределённом знаке
   }
 
-  // Степень
   let severity = 'Норма';
   if (type !== 'normal') {
-    if (acc >= 70 && tes <= 30) severity = 'Лёгкая (аномалия)';
-    else if (acc >= 50) severity = 'Средняя';
-    else severity = 'Тяжёлая';
+    const sev = (acc < 50 ? 2 : acc < 70 ? 1 : 0) + (tes > 60 ? 2 : tes > 30 ? 1 : 0) + (range > 20 ? 2 : range > 8 ? 1 : 0);
+    severity = sev >= 4 ? 'Тяжёлая' : sev >= 2 ? 'Средняя' : 'Лёгкая (аномалия)';
   }
 
   const typeLabels: Record<DeficiencyType, string> = {
@@ -51,50 +45,33 @@ function computeDiagnosis(
     deutan: 'Дейтеранопия / дейтераномалия (зелёный спектр)',
     tritan: 'Тританопия (сине-жёлтый спектр)',
   };
-
   const descriptions: Record<DeficiencyType, string> = {
     normal: 'Нарушений цветового восприятия не выявлено.',
     protan: 'Снижено восприятие красного. Красные оттенки кажутся тёмными и сливаются с коричневым и зелёным.',
     deutan: 'Снижено восприятие зелёного. Зелёные и красные оттенки трудно различить между собой.',
-    tritan: 'Снижено восприятие синего. Синие и зелёные, жёлтые и розовые оттенки путаются.',
+    tritan: 'Снижено восприятие синего. Синие/зелёные и жёлтые/розовые оттенки путаются.',
   };
 
   return { type, typeLabel: typeLabels[type], severity, description: descriptions[type] };
 }
 
 export default function Results() {
-  const [latest, setLatest] = useState<Record<string, AnyResult>>({});
+  const [session, setSession] = useState<SessionState | null>(null);
 
   useEffect(() => {
-    const byType: Record<string, AnyResult> = {};
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (!key?.startsWith('test_')) continue;
-      const raw = localStorage.getItem(key);
-      if (!raw) continue;
-      try {
-        const r: AnyResult = JSON.parse(raw);
-        const existing = byType[r.testType];
-        if (!existing || new Date(r.timestamp) > new Date(existing.timestamp)) {
-          byType[r.testType] = r;
-        }
-      } catch {
-        /* ignore */
-      }
-    }
-    setLatest(byType);
+    setSession(getSession());
   }, []);
 
-  const ish = latest['ishihara'];
-  const farn = latest['farnsworth'];
-  const fm = latest['fm100'];
-  const anom = latest['anomaloscope'];
-  const dx = computeDiagnosis(ish, farn, fm, anom);
+  const results = session?.results ?? {};
+  const ish = results.ishihara;
+  const farn = results.farnsworth;
+  const fm = results.fm100;
+  const anom = results.anomaloscope;
+  const dx = computeDiagnosis(results);
 
-  // ----- PDF на русском: рисуем отчёт на canvas, вставляем картинкой -----
   const downloadPDF = () => {
     const W = 1240;
-    const H = 1754; // A4 при ~150 dpi
+    const H = 1754;
     const canvas = document.createElement('canvas');
     canvas.width = W;
     canvas.height = H;
@@ -107,65 +84,112 @@ export default function Results() {
     ctx.fillStyle = '#111827';
     ctx.font = 'bold 54px Arial';
     ctx.fillText('Отчёт о цветовом зрении', M, y);
-    y += 50;
+    y += 48;
     ctx.fillStyle = '#6b7280';
-    ctx.font = '28px Arial';
+    ctx.font = '26px Arial';
     ctx.fillText(`Дата: ${new Date().toLocaleString('ru-RU')}`, M, y);
+    y += 34;
+    ctx.fillText(`Сессия: ${session?.id ?? '—'}`, M, y);
+    if (session?.calibration) {
+      y += 34;
+      ctx.fillText(
+        `Калибровка: ${session.calibration.gamut}, γ≈${session.calibration.gamma}, k=${session.calibration.coefficient}`,
+        M,
+        y
+      );
+    }
 
-    // Диагноз
-    y += 80;
+    y += 70;
     ctx.fillStyle = '#ea580c';
     ctx.font = 'bold 40px Arial';
     ctx.fillText('Заключение', M, y);
-    y += 55;
+    y += 52;
     ctx.fillStyle = '#111827';
-    ctx.font = 'bold 34px Arial';
+    ctx.font = 'bold 32px Arial';
     ctx.fillText(`Тип: ${dx.typeLabel}`, M, y);
-    y += 48;
+    y += 44;
     ctx.fillText(`Степень: ${dx.severity}`, M, y);
-    y += 48;
+    y += 44;
     ctx.fillStyle = '#374151';
-    ctx.font = '28px Arial';
-    wrapText(ctx, dx.description, M, y, W - 2 * M, 38);
+    ctx.font = '27px Arial';
+    y = wrapText(ctx, dx.description, M, y, W - 2 * M, 36);
 
-    // Результаты тестов
-    y += 140;
+    y += 70;
     ctx.fillStyle = '#ea580c';
     ctx.font = 'bold 40px Arial';
     ctx.fillText('Результаты по тестам', M, y);
-    y += 30;
 
     const row = (label: string, value: string) => {
-      y += 52;
+      y += 50;
       ctx.fillStyle = '#111827';
-      ctx.font = 'bold 30px Arial';
+      ctx.font = 'bold 29px Arial';
       ctx.fillText(label, M, y);
-      ctx.font = '30px Arial';
+      ctx.font = '29px Arial';
       ctx.fillStyle = '#374151';
-      ctx.fillText(value, M + 600, y);
+      ctx.fillText(value, M + 560, y);
     };
-
     row('1. Тест Ишихары', ish ? `${ish.accuracy}% (${ish.correctAnswers}/${ish.totalPlates})` : 'не пройден');
     row('2. Фарнсворт D-15', farn ? `ошибок: ${farn.errorScore - farn.perfect}` : 'не пройден');
     row('3. FM 100 Hue', fm ? `TES: ${fm.errorScore - fm.perfect}` : 'не пройден');
-    row('4. Аномалоскоп', anom ? `точка ${anom.matchPoint}/100 (откл. ${anom.deviation})` : 'не пройден');
+    row(
+      '4. Аномалоскоп',
+      anom ? `середина ${anom.midpoint}, ширина ${anom.matchingRange}` : 'не пройден'
+    );
 
-    // Дисклеймер
     ctx.fillStyle = '#9ca3af';
-    ctx.font = '24px Arial';
+    ctx.font = '23px Arial';
     wrapText(
       ctx,
       'Внимание: это скрининговый инструмент, а не медицинский диагноз. Для подтверждения обратитесь к врачу-офтальмологу.',
       M,
       H - 120,
       W - 2 * M,
-      32
+      30
     );
 
     const doc = new jsPDF({ unit: 'mm', format: 'a4' });
     doc.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, 210, 297);
     doc.save('otchet-cvetovoe-zrenie.pdf');
   };
+
+  const downloadJSON = () => {
+    const blob = new Blob([JSON.stringify({ ...session, diagnosis: dx }, null, 2)], {
+      type: 'application/json',
+    });
+    triggerDownload(blob, 'session.json');
+  };
+
+  const downloadCSV = () => {
+    const rows = [
+      ['session_id', session?.id ?? ''],
+      ['started_at', session?.startedAt ?? ''],
+      ['calibration_gamut', session?.calibration?.gamut ?? ''],
+      ['calibration_gamma', String(session?.calibration?.gamma ?? '')],
+      ['calibration_coefficient', String(session?.calibration?.coefficient ?? '')],
+      ['ishihara_accuracy', String(ish?.accuracy ?? '')],
+      ['ishihara_correct', ish ? `${ish.correctAnswers}/${ish.totalPlates}` : ''],
+      ['farnsworth_error', farn ? String(farn.errorScore - farn.perfect) : ''],
+      ['fm100_tes', fm ? String(fm.errorScore - fm.perfect) : ''],
+      ['anomaloscope_midpoint', String(anom?.midpoint ?? '')],
+      ['anomaloscope_range', String(anom?.matchingRange ?? '')],
+      ['anomaloscope_deviation', String(anom?.deviation ?? '')],
+      ['diagnosis_type', dx.type],
+      ['diagnosis_severity', dx.severity],
+    ];
+    const csv = rows.map((r) => r.map((c) => `"${c}"`).join(',')).join('\n');
+    triggerDownload(new Blob([csv], { type: 'text/csv' }), 'session.csv');
+  };
+
+  if (!session) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-4 text-gray-600">
+        <p>Нет данных сессии. Пройдите тестирование.</p>
+        <Link href="/test/calibration" className="btn-primary">
+          Начать тестирование
+        </Link>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100">
@@ -180,7 +204,6 @@ export default function Results() {
 
       <main className="container py-10">
         <div className="max-w-3xl mx-auto space-y-6">
-          {/* Заключение */}
           <div className="card border-l-4 border-orange-500">
             <h2 className="text-xl font-bold mb-3">Заключение</h2>
             <p className="text-lg font-semibold text-gray-900">{dx.typeLabel}</p>
@@ -190,7 +213,6 @@ export default function Results() {
             <p className="text-sm text-gray-700">{dx.description}</p>
           </div>
 
-          {/* Сравнение восприятия */}
           {dx.type !== 'normal' ? (
             <div className="card">
               <h2 className="text-xl font-bold mb-4">Как вы видите цвета</h2>
@@ -218,7 +240,6 @@ export default function Results() {
             </div>
           )}
 
-          {/* Результаты по тестам */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <ResultCard title="1. Тест Ишихары" color="border-orange-500" done={!!ish}>
               <p className="text-3xl font-bold text-orange-500">{ish?.accuracy}%</p>
@@ -233,23 +254,22 @@ export default function Results() {
               <p className="text-sm text-gray-600">итоговая ошибка (TES)</p>
             </ResultCard>
             <ResultCard title="4. Аномалоскоп" color="border-purple-500" done={!!anom}>
-              <p className="text-3xl font-bold text-purple-500">{anom?.matchPoint}/100</p>
-              <p className="text-sm text-gray-600">
-                отклонение {anom && (anom.deviation > 0 ? '+' : '')}{anom?.deviation}
-              </p>
+              <p className="text-3xl font-bold text-purple-500">{anom?.midpoint}/100</p>
+              <p className="text-sm text-gray-600">ширина диапазона: {anom?.matchingRange}</p>
             </ResultCard>
           </div>
 
           <div className="card bg-blue-50 border border-blue-300">
-            <h3 className="font-bold mb-4">📥 Скачать отчёт (PDF, на русском)</h3>
-            <button onClick={downloadPDF} className="w-full btn-primary">
-              Скачать PDF-отчёт →
-            </button>
+            <h3 className="font-bold mb-4">📥 Скачать отчёт</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <button onClick={downloadPDF} className="btn-primary">PDF (рус.)</button>
+              <button onClick={downloadCSV} className="btn-secondary">CSV</button>
+              <button onClick={downloadJSON} className="btn-secondary">JSON</button>
+            </div>
           </div>
 
           <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 text-sm text-yellow-800 text-center">
-            ⚠️ Скрининговый инструмент. Не является медицинским диагнозом.
-            При отклонениях обратитесь к офтальмологу.
+            ⚠️ Скрининговый инструмент. Не является медицинским диагнозом. При отклонениях обратитесь к офтальмологу.
           </div>
 
           <Link href="/" className="block btn-secondary text-center">
@@ -259,6 +279,15 @@ export default function Results() {
       </main>
     </div>
   );
+}
+
+function triggerDownload(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 function ResultCard({
@@ -280,7 +309,6 @@ function ResultCard({
   );
 }
 
-// Перенос длинного текста по словам на canvas.
 function wrapText(
   ctx: CanvasRenderingContext2D,
   text: string,
@@ -288,7 +316,7 @@ function wrapText(
   y: number,
   maxWidth: number,
   lineHeight: number
-) {
+): number {
   const words = text.split(' ');
   let line = '';
   let yy = y;
@@ -303,4 +331,5 @@ function wrapText(
     }
   }
   ctx.fillText(line, x, yy);
+  return yy;
 }

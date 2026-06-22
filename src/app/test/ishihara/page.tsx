@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import IshiaharaPlate from '@/components/IshiaharaPlate';
+import { saveResult, getCoefficient } from '@/lib/session';
 
 // Набор различных цифр (без повторов в рамках одной сессии).
 const NUMBER_POOL = ['12', '6', '29', '57', '8', '5', '3', '15', '74', '2', '45', '16', '42', '35', '96'];
@@ -31,11 +32,11 @@ export default function IshiaharaTest() {
   const [answers, setAnswers] = useState<string[]>([]);
   const [userAnswer, setUserAnswer] = useState('');
   const [done, setDone] = useState(false);
-  const [sessionId, setSessionId] = useState('');
+  const [coefficient, setCoefficient] = useState(1);
 
   useEffect(() => {
     setPlates(buildPlates(8));
-    setSessionId(Math.random().toString(36).substring(2, 11).toUpperCase());
+    setCoefficient(getCoefficient());
   }, []);
 
   if (plates.length === 0) {
@@ -64,17 +65,11 @@ export default function IshiaharaTest() {
         (a, i) => a.trim().toLowerCase() === plates[i].number.toLowerCase()
       ).length;
       const acc = Math.round((correct / plates.length) * 100);
-      localStorage.setItem(
-        `test_${sessionId}`,
-        JSON.stringify({
-          testType: 'ishihara',
-          sessionId,
-          correctAnswers: correct,
-          totalPlates: plates.length,
-          accuracy: acc,
-          timestamp: new Date().toISOString(),
-        })
-      );
+      saveResult('ishihara', {
+        correctAnswers: correct,
+        totalPlates: plates.length,
+        accuracy: acc,
+      });
       setDone(true);
     } else {
       setCurrent(current + 1);
@@ -115,7 +110,7 @@ export default function IshiaharaTest() {
 
               {/* Реальная пластина */}
               <div className="mb-6">
-                <IshiaharaPlate number={plate.number} seed={plate.seed} size={340} />
+                <IshiaharaPlate number={plate.number} seed={plate.seed} size={340} coefficient={coefficient} />
               </div>
 
               <label className="block text-sm font-semibold mb-2 text-gray-700">
